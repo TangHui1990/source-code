@@ -1,0 +1,2 @@
+obj-y += upgrade.o
+

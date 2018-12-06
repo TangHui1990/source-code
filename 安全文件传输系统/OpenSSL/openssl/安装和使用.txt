@@ -1,0 +1,522 @@
+取得 Openssl 
+ 
+
+    Openssl 是一套公布原始码(Open source)之套件，可以从 http://www.openssl.org/ 取得。此文件撰写时，Openssl 之版本为0.9.7e。 
+ 
+
+
+安装 Openssl 
+ 
+
+首先必须先下载 openssl 原始码。 
+wget http://www.openssl.org/source/ openssl-0.9.7e.tar.gz
+ 
+
+ 
+
+解压缩。 
+tar zxvf openssl-0.9.7e.tar.gz
+ 
+
+ 
+
+设定Openssl安装，「--prefix」参数为欲安装之目录，也就是安装后的档案会出现在该目录下。 
+cd openssl-0.9.7e 
+
+./config --prefix=/home/blave/openssl
+ 
+
+■将「/home/blave/openssl」指定到你自己的目录下。 
+
+
+编译 Openssl。 
+make
+ 
+
+ 
+
+安装 Openssl。 
+make install
+ 
+
+ 
+
+修改 ~/openssl/ssl/openssl.cnf。 
+dir= /home/blave/openssl/ssl/misc/demoCA   #设定存取凭证的路径,并将blave改成您自己
+
+default_days= 3650    #设定凭证可使用之天数
+
+default_bits = 2048    #设定金钥长度(bits)
+ 
+
+ 
+ 
+
+产生 CA 凭证 
+ 
+
+    我们所产生的 CA凭证，将放置在 ~/openssl/ssl/misc/demoCA 下，以下我们将介绍如何产生出最上层的 CA凭证。 
+
+
+执行CA凭证产生程式。 
+cd ~/openssl/ssl/misc
+
+./CA.sh -newca
+
+CA certificate filename (or enter to create)
+
+[enter]
+
+Making CA certificate ... 
+
+Generating a 1024 bit RSA private key
+
+................................ .............................++++++
+
+..++++++
+
+writing new private key to './demoCA/private/./cakey.pem'
+
+Enter PEM pass phrase:[设定通行码]
+
+Verifying - Enter PEM pass phrase:[确认通行码]
+
+-----
+
+You are about to be asked to enter information that will be incorporated
+
+into your certificate request.
+
+What you are about to enter is what is called a Distinguished Name or a DN.
+
+There are quite a few fields but you can leave some blank
+
+For some fields there will be a default value,
+
+If you enter '.', the field will be left blank.
+
+-----
+
+Country Name (2 letter code) [GB]:TW
+
+State or Province Name (full name) [Berkshire]:Taiwan
+
+Locality Name (eg, city) [Newbury]:Taichung
+
+Organization Name (eg, company) [My Company Ltd]:Tung-hai University
+
+Organizational Unit Name (eg, section) []:ISLAB
+
+Common Name (eg, your name or your server's hostname) []:ISLAB_CA
+
+Email Address []:blave@islab.csie. thu.edu.tw
+ 
+
+ 
+
+确定CA凭证及金钥是否产生。 
+cd ~/openssl/ssl/misc/demoCA 
+
+ls
+
+cacert.pem  certs  crl  index.txt  newcerts  private  serial
+ 
+
+可见「cacert.pem」即是CA之凭证，而「private」目录即是存放CA私钥之处。 
+ 
+
+设定CA凭证之存取权限，仅允许本人能存取，他人必须限制其存取权限。 
+chmod -R 660 ~/openssl/ssl/misc/ demoCA
+ 
+
+ 
+ 
+
+以 CA产生次级凭证 
+ 
+
+    在CA凭证产生完之后，我们便可以产生使用者或公司所需要之凭证，此次级凭证产生后，使用者便可应用于Email签章加密或https等ssl传输加密。 
+
+
+产生使用者之金钥档及CSR档(Certificate Signing Request)。 
+cd ~/openssl/ssl/misc/demoCA 
+
+~/openssl/bin/openssl req -nodes -new -keyout islab_key.pem \
+
+-out islab_req.pem -days 3650 -config ~/openssl/ssl/openssl.cnf 
+
+
+#此处「-keyout」即为产生Private key之档名，我们以「islab_key.pem」为例
+
+#，您可自行设定。而「-out」则产生CSR档，我们以「islab_req.pem」为例。 
+
+
+Generating a 2048 bit RSA private key
+
+................................ ..........................+++
+
+................................ ................................................................+++
+
+writing new private key to 'islab_key.pem'
+
+-----
+
+You are about to be asked to enter information that will be incorporated
+
+into your certificate request.
+
+What you are about to enter is what is called a Distinguished Name or a DN.
+
+There are quite a few fields but you can leave some blank
+
+For some fields there will be a default value,
+
+If you enter '.', the field will be left blank.
+
+-----
+
+Country Name (2 letter code) [TW]:TW
+
+State or Province Name (full name) [TAIWAN]:Taiwan
+
+Locality Name (eg, city) []:Taichung
+
+Organization Name (eg, company) [THU]:THU
+
+Organizational Unit Name (eg, section) []:ISLAB
+
+Common Name (eg, YOUR name) []:blave@islab.csie.thu.edu.tw
+
+#Common Name请输入您所欲使用之名称，如此凭证产生后欲使用在 Email
+
+#签章，则必须填入email名称；若此凭证欲使用在https，则必须填网址。 
+
+
+Email Address []:blave@islab.csie. thu.edu.tw 
+
+
+Please enter the following 'extra' attributes
+
+to be sent with your certificate request
+
+A challenge password []:[password]
+
+An optional company name []:[company]
+
+#以上两项可随意输入即可。
+ 
+
+ 
+
+产生使用者之凭证。 
+~/openssl/bin/openssl ca -config ~/openssl/ssl/openssl.cnf \
+
+-policy policy_anything -out islab_cert.pem -infiles islab_req.pem
+
+Using configuration from /home/blave/openssl/ssl/openssl.cnf
+
+Enter pass phrase for /home/blave/ openssl/ssl/misc/demoCA/private/cakey.pem:[输入CA通行码]
+
+Check that the request matches the signature
+
+Signature ok
+
+Certificate Details:
+
+Serial Number: 1 (0x1)
+
+Validity
+
+Not Before: Feb 24 14:34:58 2005 GMT
+
+Not After : Feb 22 14:34:58 2015 GMT
+
+Subject:
+
+countryName = TW
+
+stateOrProvinceName = Taiwan
+
+localityName = Taichung
+
+organizationName = THU
+
+organizationalUnitName= ISLAB
+
+commonName = blave@islab.csie.thu.edu.tw
+
+emailAddress = blave@islab.csie.thu.edu.tw
+
+X509v3 extensions:
+
+X509v3 Basic Constraints:
+
+CA:FALSE
+
+Netscape Comment:
+
+OpenSSL Generated Certificate
+
+X509v3 Subject Key Identifier:
+
+EC:88:66:DE:FF:79:CE:81:C2:EE:93:BF:9A:65:92:3B:AC:2C:CD:7E
+
+X509v3 Authority Key Identifier:
+
+keyid:37:AA:42:CF:FA:D9:73:C7:80:E5:0C:E2:9F:7B:95:86:40:66:72:C5
+
+DirName:/C=TW/ST=Taiwan/L=Taichung/O=Tung-hai University/OU=ISLAB/CN=ISLAB_CA/ emailAddress=blave@islab.csie.thu.edu.tw
+
+serial:00 
+
+
+Certificate is to be certified until Feb 22 14:34:58 2015 GMT (3650 days)
+
+Sign the certificate? [y/n]:y& nbsp;
+ 
+
+
+1 out of 1 certificate requests certified, commit? [y/n]y
+
+Write out database with 1 new entries
+
+Data Base Updated
+ 
+
+ 
+
+检查凭证是否产生。 
+cd ~/openssl/ssl/misc/demoCA 
+
+ls
+
+cacert.pem crl   index.txt.attr  islab_cert.pem  islab_req.pem  private  serial.old     certs       index.txt  index.txt.old   islab_key.pem   newcerts       serial
+ 
+
+■以上可见，islab_cert.pem、islab_req.pem及islab_key.pem分别为刚刚所产生出来的凭证、CSR及Private Key。 
+ 
+
+
+Openssl 应用 
+ 
+
+以cacert验证产生出来的使用者cert 
+~/openssl/bin/openssl verify -CApath . \ 
+
+-CAfile cacert.pem islab_cert.pem
+ 
+
+ 
+ 
+
+检查产生的序号 
+~/openssl/bin/openssl x509 -noout -serial -in islab_cert.pem
+
+serial=01
+ 
+
+ 
+ 
+
+检查发行者资讯 
+~/openssl/bin/openssl x509 -noout -issuer -in islab_cert.pem
+
+issuer= /C=TW/ST=TAIWAN/L=Taichung/ O=THU/OU=ISLAB/CN=www.tekgate.idv.tw/emailAddress=blave@mail.tekgate.idv.tw 
+ 
+
+ 
+ 
+
+检查凭证起始及终止日期时间 
+~/openssl/bin/openssl x509 -noout -in islab_cert.pem -dates
+
+notBefore=Feb 24 07:54:16 2005 GMT
+
+notAfter=Feb 22 07:54:16 2015 GMT
+ 
+
+ 
+ 
+
+检查个人凭证资讯subject 
+~/openssl/bin/openssl x509 -noout -in islab_cert.pem -subject
+
+subject= /C=TW/ST=TAIWAN/L=Taichung/ O=THU/OU=CSIE/CN=blave@mail.tekgate.idv.tw/emailAddress=blave@mail.tekgate.i dv. tw
+ 
+
+ 
+ 
+
+检查MD5 fingerprint 
+~/openssl/bin/openssl x509 -noout -in islab_cert.pem -fingerprint
+
+MD5 Fingerprint=A4:A1:95:41:CC:26:18:00:AA:16:07:25:A8:5F:65:6E
+ 
+
+ 
+ 
+
+检查SHA-1 fingerprint 
+~/openssl/bin/openssl x509 -noout -in islab_cert.pem -fingerprint -sha1
+
+SHA1 Fingerprint=B2:D7:CF:DF:DA:B7:A6:3B:4C:99:3A:94:52:64:B8:28:0B:3A:24:9D
+ 
+
+ 
+ 
+
+由PEM转至PKCS12。Microsoft Outlook Express使用PKCS12格式，因此欲使用Microsoft Outlook Express寄出签章信件，只要将产生出来的.p12档安装在Windows即可使用。 
+~/openssl/bin/openssl pkcs12 -export -in islab_cert.pem -out islab_cert.p12 -name Blave's Certificate -inkey islab_key.pem
+
+Enter Export Password:
+
+Verifying - Enter Export Password:
+ 
+
+ 
+ 
+
+由PKCS12转至PEM 
+ 
+
+由PKCS12产生Private Key 
+~/openssl/bin/openssl pkcs12 -in islab_cert.p12 -out islab_key2.pem
+
+Enter Import Password:
+
+MAC verified OK
+
+Enter PEM pass phrase:
+
+Verifying - Enter PEM pass phrase:
+ 
+
+ 
+ 
+
+再由Private Key产生凭证 
+~/openssl/bin/openssl x509 -in islab_key2.pem -text \
+
+-out islab_cert2.pem
+ 
+
+ 
+ 
+
+文件加密 
+    「islab_cert.pem」为个人凭证，可以公开给大家，因此某人欲加密传送一文件给我，便可以依下列方式加密。编辑一纯文字档，在此我们预设档名为「document.txt」，而经加密码之档名为「document.enc」。
+
+    
+echo "This is a text file." > document.txt
+
+cat document.txt
+
+This is a text file.
+
+~/openssl/bin/openssl smime -encrypt -in document.txt \
+
+-out document.enc islab_cert.pem
+
+cat document.enc
+
+MIME-Version: 1.0
+
+Content-Dis; filename="smime.p7m"
+
+Content-Type: application/x-pkcs7- mime; 
+
+Content-Transfer-Encoding: base64 
+
+
+MIICFgYJKoZIhvcNAQcDoIICBzCCAgMCAQAxggG5MIIBtQIBADCBnDCBljEL MAkG
+
+A1UEBhMCVFcxDzANBgNVBAgTBlRBSVdBTjERMA8GA1UEBxMIVGFpY2h 1bmcxDDAK
+
+…
+
+(略)
+
+…
+
+DQEHATAaBggqhkiG9w0DAjAOAgIAoAQIIyXl/ VHcSASAGOtS9efsvXwqks1LmBp6
+
+irSgxerAE6TShw==
+ 
+
+ 
+ 
+
+文件解密 
+    倘若我们收到了某人传送的「document.enc」，我们便能使用Private Key来进行解密。
+
+    
+~/openssl/bin/openssl smime -decrypt -in document.enc \
+
+-recip islab_cert.pem -inkey islab_key.pem
+
+This is a text file.
+ 
+
+ 
+ 
+
+文件签章 
+    为文件签章可证明文件的来源为本人无误，并且可以验证文件是否被篡改。我们依前例，为一纯文字档「document.txt」签章，签章后档名为「document.sig」。
+
+    
+~/openssl/bin/openssl smime -sign -inkey islab_key.pem \
+
+-signer islab_cert.pem -in document.txt -out document.sig
+
+cat document.sig
+
+MIME-Version: 1.0
+
+Content-Type: multipart/signed; protocol="application/x-pkcs7-signature"; micalg=sha1; boundary=& quot;----F565CC3F7AEE7ACC3F74CA855D8EC920" 
+
+
+This is an S/MIME signed message 
+
+
+------F565CC3F7AEE7ACC3F74CA855D8EC920
+
+This is a text file. 
+
+
+------F565CC3F7AEE7ACC3F74CA855D8EC920
+
+Content-Type: application/x-pkcs7- signature; 
+
+Content-Transfer-Encoding: base64
+
+Content-Dis; filename="smime.p7s" 
+
+
+MIIHBgYJKoZIhvcNAQcCoIIG9zCCBvMCAQExCzAJBgUrDgMCGgUAMAsGC SqGSIb3
+
+DQEHAaCCBFYwggRSMIIDu6ADAgECAgEBMA0GCSqGSIb3DQEBBAUAM IGWMQswCQYD
+
+…
+
+(略)
+
+…
+
+------F565CC3F7AEE7ACC3F74CA855D8EC920- -
+ 
+
+ 
+ 
+
+文件签章验证 
+    当某人收到这份文件时，可利用我们的凭证(islab_cert.pem)以及CA凭证(cacert.pem)来验证文件。
+
+    
+~/openssl/bin/openssl smime -verify -in document.sig \
+
+-signer islab_cert.pem -out document.txt -CAfile cacert.pem
+
+Verification successful
+ 
+
+■因此我们可以知道，验证方必须事先取得 CA凭证(cacert.pem)方可验证文件。

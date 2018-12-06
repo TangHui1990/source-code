@@ -1,0 +1,15 @@
+./config  --prefix=/usr/local 
+make && make install
+
+安装之后发现里面只有 libcrypto.a libssl.a 两个静态库
+而没有我想要的 libcrypto.so.0.9.8 (动态库),原因是 openssl 编译时默认参数为生成静态库
+./config  --help (查看选项)
+
+获取动态库的方法
+
+./config shared --prefix=/usr/local --openssldir=/usr/local/ssl
+
+prefix 是安装目录，openssldir 是配置文件目录，另外建议安装两次，shared 作用是生成动态连接库
+
+
+

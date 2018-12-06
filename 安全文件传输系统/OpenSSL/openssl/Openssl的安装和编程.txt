@@ -1,0 +1,282 @@
+参照：http://blog.csdn.net/gofishing/archive/2006/04/18/667116.aspx（他写的好像是windows上面的，不过函数都是相同的拉。。）
+接着前面的Openssl的安装和编程（一），现在就可以些程序了
+客户端client.c
+#include <stdio.h>
+#include <memory.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+
+#include <openssl/crypto.h>
+#include <openssl/x509.h>
+#include <openssl/pem.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#define CERTF "/home/ming/sslfile/client.crt"
+#define KEYF "/home/ming/sslfile/client.key"
+#define CACERT "/home/ming/sslfile/ca.crt"
+
+#define CHK_NULL(x) if ((x)==NULL) exit (1)
+#define CHK_ERR(err,s) if ((err)==-1) { perror(s); exit(1); }
+#define CHK_SSL(err) if ((err)==-1) { ERR_print_errors_fp(stderr); exit(2); }
+
+int main ()
+{
+  int err;
+  int sd;
+  struct sockaddr_in sa;
+  SSL_CTX* ctx;
+  SSL*     ssl;
+  X509*    server_cert;
+  char*    str;
+  char     buf [4096];
+  SSL_METHOD *meth;
+
+  SSLeay_add_ssl_algorithms();
+  meth = SSLv2_client_method();
+  SSL_load_error_strings();
+  ctx = SSL_CTX_new (meth);                        CHK_NULL(ctx);
+
+  CHK_SSL(err);
+  printf("var has made!\n");
+  SSL_CTX_set_verify(ctx,SSL_VERIFY_PEER,NULL);
+  SSL_CTX_load_verify_locations(ctx,CACERT,NULL);
+  
+
+  if (SSL_CTX_use_certificate_file(ctx, CERTF, SSL_FILETYPE_PEM) <= 0) {
+  ERR_print_errors_fp(stderr);
+  exit(-2);
+  }else printf("Client use certificate file ok!\n");
+
+  if (SSL_CTX_use_PrivateKey_file(ctx, KEYF, SSL_FILETYPE_PEM) <= 0) {
+  ERR_print_errors_fp(stderr);
+  exit(-3);
+  }else printf("Client use PrivateKey file ok!\n");
+
+  if (!SSL_CTX_check_private_key(ctx)) {
+  printf("Private key does not match the certificate public key\n");
+  exit(-4);
+  }else printf("Client Private key match!\n");
+ 
+ 
+
+  sd = socket (AF_INET, SOCK_STREAM, 0);       CHK_ERR(sd, "socket");
+
+  memset (&sa, '\0', sizeof(sa));
+  sa.sin_family      = AF_INET;
+  sa.sin_addr.s_addr = inet_addr ("127.0.0.1");  
+  sa.sin_port        = htons     (1111);         
+  printf("socket has created!\n");
+  err = connect(sd, (struct sockaddr*) &sa,
+        sizeof(sa));                   CHK_ERR(err, "connect");
+
+ 
+ 
+
+  ssl = SSL_new (ctx);                         CHK_NULL(ssl);
+  SSL_set_fd (ssl, sd);
+  err = SSL_connect (ssl);                     CHK_SSL(err);
+ printf("SSL has connected!\n");
+ 
+
+ 
+
+  printf ("SSL connection using %s\n", SSL_get_cipher (ssl));
+
+ 
+
+  server_cert = SSL_get_peer_certificate (ssl);       CHK_NULL(server_cert);
+  printf ("Server certificate:\n");
+
+  str = X509_NAME_oneline (X509_get_subject_name (server_cert),0,0);
+  CHK_NULL(str);
+  printf ("\t subject: %s\n", str);
+  OPENSSL_free (str);
+
+  str = X509_NAME_oneline (X509_get_issuer_name  (server_cert),0,0);
+  CHK_NULL(str);
+  printf ("\t issuer: %s\n", str);
+  OPENSSL_free (str);
+
+ 
+
+  X509_free (server_cert);
+
+ 
+ 
+
+  err = SSL_write (ssl, "Hello World!", strlen("Hello World!"));  CHK_SSL(err);
+
+  err = SSL_read (ssl, buf, sizeof(buf) - 1);                     CHK_SSL(err);
+  buf[err] = '\0';
+  printf ("Got %d chars:'%s'\n", err, buf);
+  SSL_shutdown (ssl); 
+
+ 
+
+  close (sd);
+  SSL_free (ssl);
+  SSL_CTX_free (ctx);
+  return 0;
+}
+
+服务端：server.c
+
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <memory.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+
+#include <openssl/rsa.h>      
+#include <openssl/crypto.h>
+#include <openssl/x509.h>
+#include <openssl/pem.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+
+
+#define HOME ""
+
+
+
+
+
+#define CERTF "/home/ming/sslfile/server.crt"
+#define KEYF "/home/ming/sslfile/server.key"
+#define CACERT "/home/ming/sslfile/ca.crt"
+#define CHK_NULL(x) if ((x)==NULL) exit (1)
+#define CHK_ERR(errCERT,s) if ((err)==-1) { perror(s); exit(1); }
+#define CHK_SSL(err) if ((err)==-1) { ERR_print_errors_fp(stderr); exit(2); }
+
+int main ()
+{
+  int err;
+  int listen_sd;
+  int sd;
+  struct sockaddr_in sa_serv;
+  struct sockaddr_in sa_cli;
+  size_t client_len;
+  SSL_CTX* ctx;
+  SSL*     ssl;
+  X509*    client_cert;
+  char*    str;
+  char     buf [4096];
+  SSL_METHOD *meth;
+   printf("I'm server\n");
+ 
+
+  SSL_load_error_strings();
+  SSLeay_add_ssl_algorithms();
+  meth = SSLv23_server_method();
+  ctx = SSL_CTX_new (meth);
+
+  if (!ctx) {
+    ERR_print_errors_fp(stderr);
+    exit(2);
+  }
+
+
+
+  if (SSL_CTX_use_certificate_file(ctx, CERTF, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(3);
+  }
+  else printf("Server use certificate file ok!\n");
+
+
+  if (SSL_CTX_use_PrivateKey_file(ctx, KEYF, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(4);
+  }
+  else printf("Server use PrivateKey file ok!\n");
+
+
+  if (!SSL_CTX_check_private_key(ctx)) {
+    fprintf(stderr,"Private key does not match the certificate public key\n");
+    exit(5);
+  }
+  else printf("Server Private key match!\n");
+
+ 
+
+  SSL_CTX_set_cipher_list(ctx,"RC4-MD5");
+ 
+
+  listen_sd = socket (AF_INET, SOCK_STREAM, 0);   CHK_ERR(listen_sd, "socket");
+
+  memset (&sa_serv, '\0', sizeof(sa_serv));
+  sa_serv.sin_family      = AF_INET;
+  sa_serv.sin_addr.s_addr = INADDR_ANY;
+  sa_serv.sin_port        = htons (1111);         
+
+  err = bind(listen_sd, (struct sockaddr*) &sa_serv,
+         sizeof (sa_serv));                   CHK_ERR(err, "bind");
+
+  printf("Server Prepare TCP socket for receiving connections has done!\n");
+ 
+
+  err = listen (listen_sd, 5);                    CHK_ERR(err, "listen");
+
+  client_len = sizeof(sa_cli);
+  sd = accept (listen_sd, (struct sockaddr*) &sa_cli, &client_len);
+  CHK_ERR(sd, "accept");
+  close (listen_sd);
+
+  printf ("Connection from %lx, port %x\n",
+      sa_cli.sin_addr.s_addr, sa_cli.sin_port);
+
+ 
+ 
+
+  ssl = SSL_new (ctx);                           CHK_NULL(ssl);
+  SSL_set_fd (ssl, sd);
+  err = SSL_accept (ssl);                        CHK_SSL(err);
+  printf("ssl has accept!\n");
+ 
+
+  printf ("SSL connection using %s\n", SSL_get_cipher (ssl));
+
+ 
+
+
+ 
+
+  err = SSL_read (ssl, buf, sizeof(buf) - 1);                   CHK_SSL(err);
+  buf[err] = '\0';
+  printf ("Got %d chars:'%s'\n", err, buf);
+
+  err = SSL_write (ssl, "I hear you.", strlen("I hear you."));  CHK_SSL(err);
+
+ 
+
+  close (sd);
+  SSL_free (ssl);
+  SSL_CTX_free (ctx);
+  return 0;
+}
+
+
+编译链接：
+gcc client.c -o cli -I /usr/local/ssl/include/ -L /usr/local/ssl/lib/ -lssl -lcrypto -ldl
+gcc server.c -o ser -I /usr/local/ssl/include/ -L /usr/local/ssl/lib/ -lssl -lcrypto -ldl
+
+-I 就算前面说的openssl的include的安装目录，-L 就是openssl安装的链接库目录，ssl,crypto,dl都是要用的库。。
+
+运行：(先运行服务端)
+./ser  
+(要求输入密码)
+
+再打开一个终端
+运行
+./cli
+就可以看到效果了

@@ -1,0 +1,700 @@
+包结构 
+src 
+  test 
+    TestThreadPool          测试类 
+  thread 
+    ThreadPool              线程池类 
+    WorkThread              工作线程类 
+    TaskMonitorThread       任务监测线程类 
+    TaskTimeOutThread       任务超时监测线程类 
+  task 
+    TaskManager             任务管理器 
+    WorkTask                任务接口 
+    WorkTaskImp             正常任务类 
+    WorkTaskAImp            异常任务类 
+    WorkTaskBImp            超时任务类 
+  event 
+    AbstractEvent           任务事件类 
+    BeginTaskEvent          任务执行开始事件类 
+    EndTaskEvent            任务执行结束事件类 
+    TaskRunTime             任务运行时间类 
+    TaskTimeOutEvent        任务执行超时事件类 
+
+源代码 
+
+package test;
+import task.TaskManager;
+import task.WorkTask;
+import task.WorkTaskAImp;
+import task.WorkTaskBImp;
+import task.WorkTaskImp;
+import thread.ThreadPool;
+/**
+ * 线程池测试类,测试功能如下：
+ * 1、测试线程池创建功能
+ * 2、测试处理并发请求功能
+ * 3、测试关闭功能
+ **/
+public class TestThreadPool {
+	public static void main(String[] args){
+		//创建线程池,开启处理请求服务
+		final int threadCount=10;
+		ThreadPool pool=ThreadPool.getInstance();
+		pool.init(threadCount);
+		//接收客户端请求
+		WorkTask task1=new WorkTaskBImp("执行超时任务...");
+		TaskManager.addTask(task1);
+		final int requestCount=20;
+		for(int i=0;i<requestCount;i++){
+			WorkTask task=new WorkTaskImp("执行第"+i+"个增加用户操作...");
+			TaskManager.addTask(task);
+		}
+		WorkTask task2=new WorkTaskBImp("执行超时任务...");
+		TaskManager.addTask(task2);
+		for(int i=0;i<requestCount;i++){
+			WorkTask task=new WorkTaskAImp("执行第"+i+"个修改用户异常操作...");
+			TaskManager.addTask(task);
+		}
+		for(int i=0;i<requestCount;i++){
+			WorkTask task=new WorkTaskImp("执行第"+i+"个删除用户操作...");
+			TaskManager.addTask(task);
+		}
+		//关闭线程池
+		try {
+			Thread.sleep(2000);//为了显示处理请求效果
+			pool.close();
+		} catch (InterruptedException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+}
+package thread;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Vector;
+import event.BeginTaskEvent;
+import event.EndTaskEvent;
+import task.TaskManager;
+/**
+ * 线程池类，功能如下：
+ * 1、初始化线程池
+ * 2、获取空闲线程
+ * 3、任务运行，注册超时监测
+ * 4、任务结束，注销超时监测
+ * 5、关闭线程池
+ */
+public class ThreadPool {
+	private int threadcount;
+	private int GetIdleThreadPollTime=50;//获取空闲线程轮询间隔时间,可配置
+	private static ThreadPool pool=new ThreadPool();//线程实例	
+	private Vector<WorkThread> threadlist=new Vector<WorkThread>();//工作线程列表
+	private TaskMonitorThread mainThread;//任务监测线程
+	private TaskTimeOutThread timeThread; //任务超时线程
+	private boolean StopGetIdleThread=false;
+    //单例模式
+	private ThreadPool(){
+	}	
+	public static synchronized ThreadPool getInstance(){
+		return pool;
+	}
+	private void stopGetIdleThread(){
+		StopGetIdleThread = true;
+	}
+	//初始化线程池
+	public  void init(int count){
+		System.out.println("开始初始化线程池...");
+		threadcount=count;
+		for(int i=0;i<count;i++){
+			WorkThread t=new WorkThread(new Integer(i));
+			threadlist.add(t);
+			t.start();
+		}
+		mainThread=new  TaskMonitorThread(pool);
+		mainThread.start();
+		timeThread=new TaskTimeOutThread(pool);
+		timeThread.start();
+		System.out.println("结束初始化线程池...");
+	}
+	//获取空闲线程
+	public  WorkThread getIdleThread(){
+			while(true){
+				if (StopGetIdleThread) return null;
+				synchronized(threadlist){
+					for(int i=0;i<threadlist.size();i++){
+						WorkThread t=(WorkThread)threadlist.get(i);
+						if (t.getMyState().equals(WorkThread.IDlESTATE)){
+							return t;
+						}
+					}
+				}
+			try {
+Thread.sleep(GetIdleThreadPollTime);//放弃CPU,若干时间后重新获取空闲线程
+			} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+	}
+	//任务运行，注册监测
+	public  void beginTaskRun(BeginTaskEvent begin){
+		timeThread.beginTaskRun(begin);
+	}
+	//任务结束，注销监视
+	public  void endTaskRun(EndTaskEvent end){
+		timeThread.endTaskRun(end);
+	}
+	
+	//从工作线程表中移除线程
+	public  void removeWorkThread(WorkThread t){
+		threadlist.remove(t);
+	}
+	//添加新的线程
+	public void addWorkThread(){
+		synchronized(threadlist){
+			WorkThread t=new WorkThread(new Integer(++threadcount));
+			threadlist.add(t);
+			t.start();
+		}
+	}
+	
+	//关闭线程池
+	public  void close(){
+		//停止获取空闲线程
+		stopGetIdleThread();
+		//关闭任务监测线程，不再接收请求
+		mainThread.kill();
+		//关闭超时监测线程
+		timeThread.kill();
+		//关闭工作线程，不再处理任务
+		for(int i=0;i<threadlist.size();i++){
+			WorkThread t=(WorkThread)threadlist.get(i);
+			t.kill();
+		}
+	}
+	
+	
+}
+package thread;
+import task.WorkTask;
+import event.BeginTaskEvent;
+import event.EndTaskEvent;
+/**
+ * 工作线程类,功能如下：
+ * 1、执行业务方法，业务参数可动态设置
+ * 2、自身状态可设置、可获取
+ * 3、自我唤醒功能
+ * 4、自杀功能
+ */
+public final class WorkThread extends Thread{
+	private boolean shutdown=false;
+	private String info; //业务参数
+	private Object threadKey;//线程标识
+	private Object lock=new Object();//锁对象
+	private String state; //线程状态
+	private int waitExecFinishPollTime=500;//关闭线程时的轮询等待时间，可配置
+	public static final String CREATESTATE="1";//创建状态
+	public static final String RUNSTATE="2";   //运行状态
+	public static final String IDlESTATE="3";  //空闲状态
+    private WorkTask nowTask; //当前任务
+	//获取线程标识key
+	public Object getThreadKey() {
+		return threadKey;
+	}      
+    //设置线程的任务
+    public void setWorkTask(WorkTask task){
+    	this.nowTask=task;
+    }
+	//设置是否关闭线程
+	private void setShutdown(boolean shutdown) {
+		this.shutdown = shutdown;
+	}
+	//设置线程状态
+	private void setMyState(String state){
+		this.state=state;
+	}
+	//获取线程状态
+	public String getMyState(){
+		return state;
+	}
+	public WorkThread(Object key){
+		System.out.println("正在创建工作线程...线程编号"+key.toString());
+		this.threadKey=key;
+		this.state=CREATESTATE;
+	}
+	
+	@Override
+	public synchronized void start() {
+		// TODO Auto-generated method stub
+		super.start();
+		setMyState(RUNSTATE);
+	}
+	public void run(){
+		while(true){
+			try {
+				setMyState(IDlESTATE);
+				synchronized(this){
+					wait(); /*开始等待，直至被激活*/
+				}
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			if (shutdown) break;
+			try{
+				new BeginTaskEvent(this,Thread.currentThread(),nowTask).execute();
+				nowTask.execute();//执行业务
+				new EndTaskEvent(this,Thread.currentThread(),nowTask).execute();
+			}catch(Exception e){
+				new EndTaskEvent(this,Thread.currentThread(),nowTask).execute();
+				System.out.println(e.getMessage());
+			}
+		}
+	}
+	//重新激活线程
+	public void activate(){
+		synchronized(this){
+			setMyState(RUNSTATE);
+			notify();
+		}
+	}
+	//关闭线程
+	public void kill(){
+		synchronized(this){
+		    if (this.getMyState().equals(IDlESTATE)){//如果线程处于空闲状态,则直接关掉
+				System.out.println("正在关闭工作线程...线程编号"+threadKey.toString());
+		    	this.setShutdown(true);
+		    	this.activate();
+		    }else if (this.getMyState().equals(RUNSTATE)){//如果线程处于运行状态,则执行完后再关掉
+		System.out.println("正在等待线程执行业务完成...工作线程编号"+threadKey.toString());
+		    	while(this.getMyState().equals(RUNSTATE)){
+		    		try {
+		Thread.sleep(waitExecFinishPollTime);//放弃CPU,若干时间后再检查线程状态
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+		    	}
+				System.out.println("正在关闭工作线程...线程编号"+threadKey.toString());
+		    	this.setShutdown(true);
+		    	this.activate();
+		    }
+		}
+	}
+}
+package thread;
+import task.TaskManager;
+import task.WorkTask;
+/**
+ * 任务检测线程类
+ * 1、自杀功能 
+ */
+public final class TaskMonitorThread extends Thread {
+	private ThreadPool threadPool;
+	private int GetWorkTaskPollTime=10;//监测任务轮询时间，可配置
+	private boolean shutdown=false; 
+	public TaskMonitorThread(ThreadPool pool){
+		System.out.println("正在创建任务监测线程...");
+		this.threadPool=pool;
+	}
+	private void setShutDown(boolean b){
+		this.shutdown=b;
+	}
+	@Override
+	public void run() {
+		// TODO Auto-generated method stub
+			while(true){
+				if (shutdown) break;
+				WorkTask task=TaskManager.getWorkTask();//看是否有任务请求
+				if (task==null){
+					try {
+						Thread.sleep(GetWorkTaskPollTime);
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}else{
+					WorkThread t=threadPool.getIdleThread();//获取空闲线程
+					if (t==null) break;
+					t.setWorkTask(task);//设置线程任务
+					task.setTaskThreadKey(t.getThreadKey());//为了显示任务当前线程
+					t.activate();//激活空闲线程
+					try {
+						Thread.sleep(GetWorkTaskPollTime); 
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}
+			}
+	}
+	//关闭线程
+	public  void kill(){
+		System.out.println("正在关闭任务监测线程...");
+		this.setShutDown(true);
+	}
+	
+}
+package thread;
+import java.util.Vector;
+import event.BeginTaskEvent;
+import event.EndTaskEvent;
+import event.TaskRunTime;
+import event.TaskTimeOutEvent;
+/**
+ * 任务超时监测线程类
+ * 1、任务开始注册
+ * 2、任务完成注销
+ * 3、自杀功能 
+ */
+public class TaskTimeOutThread extends Thread {
+	private ThreadPool pool;
+	private boolean shutdown=false;
+	private Vector<TaskRunTime> taskruntimelist=new Vector<TaskRunTime>();//运行任务列表
+	private int pollTime=500; //轮询时间
+	private int TaskOutTime=2000; //任务过时时间
+	public TaskTimeOutThread(ThreadPool pool){
+		this.pool=pool;
+	}
+	@Override
+	public void run() {
+		// TODO Auto-generated method stub
+			while(!shutdown){
+				synchronized(taskruntimelist){
+					for(int i=0;i<taskruntimelist.size();i++){
+						TaskRunTime t=(TaskRunTime) taskruntimelist.get(i);
+						if (t.checkRunTimeOut(TaskOutTime)){
+							taskruntimelist.remove(i);
+							new TaskTimeOutEvent(t.getEvent()).execute();
+							break;
+						}
+					}
+				}
+				try {
+					sleep(pollTime);
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+	}
+	
+	//任务运行，开始监测
+	public  void beginTaskRun(BeginTaskEvent begin){
+		taskruntimelist.add(new TaskRunTime(begin));
+	}
+	//任务正常结束
+	public  void endTaskRun(EndTaskEvent end){
+		synchronized(taskruntimelist){
+			for(int i=0;i<taskruntimelist.size();i++){
+				BeginTaskEvent begin=((TaskRunTime) taskruntimelist.get(i)).getEvent();
+				if (begin.equals(end)){
+					taskruntimelist.remove(i);
+					break;
+				}
+			}
+		}
+	}
+	
+	//自杀
+	public void kill(){
+		System.out.println("正在关闭超时监测线程...");
+		while(taskruntimelist.size()>0){
+			try {
+				Thread.sleep(pollTime);
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+		shutdown=true;
+	}
+	
+}
+package task;
+import java.util.ArrayList;
+import java.util.List;
+/**
+ *  任务管理器
+ *  1、添加任务
+ *  2、监测是否有新任务
+ */
+public class TaskManager {
+	private  static List taskQueue=new ArrayList<WorkTask>(); //任务队列 
+	private TaskManager(){
+		
+	}
+	//添加任务                                            
+	public synchronized static  void addTask(WorkTask task){
+		taskQueue.add(task);
+	}
+	//判断是否有任务未执行
+	public synchronized static WorkTask getWorkTask(){
+		if (taskQueue.size()>0){
+			return (WorkTask)taskQueue.remove(0);
+		}else
+			return null;
+	}
+}
+package task;
+/**
+ * 任务接口 
+ * 继承它来定义自己具体的工作任务
+ */
+public interface WorkTask {
+	void execute() throws Exception; //执行工作任务
+	void setTaskThreadKey(Object key);//设置任务线程编号
+}
+package task;
+/**
+ * 任务类1
+ * 正常执行的工作任务 
+ */
+public class WorkTaskImp implements WorkTask {
+	protected String param;
+	protected Object threadkey; //为了显示执行线程编号
+	protected final int TaskExecTime=500; //任务执行时间
+	public void execute() throws Exception {
+		// TODO Auto-generated method stub
+		System.out.println(param+"工作线程编号"+threadkey.toString());
+	    Thread.sleep(TaskExecTime);
+	}
+	public WorkTaskImp(String param){
+		this.param=param;
+	}
+	public void setTaskThreadKey(Object key){
+		this.threadkey=key;
+	}
+	public String toString(){
+		return param+"工作线程编号"+threadkey.toString();
+	}
+}
+package task;
+/**
+ * 任务类2
+ * 执行报异常的工作任务 
+ */
+public class WorkTaskAImp extends WorkTaskImp{
+	public WorkTaskAImp(String param) {
+		super(param);
+		// TODO Auto-generated constructor stub
+	}
+	public void execute() throws Exception {
+		// TODO Auto-generated method stub
+		throw new Exception("运行WorkTaskAImp任务时出错");
+	}
+}
+package task;
+/*
+ * 任务类3
+ * 执行超时的工作任务
+ */
+public class WorkTaskBImp extends WorkTaskImp{
+	public WorkTaskBImp(String param) {
+		super(param);
+		// TODO Auto-generated constructor stub
+	}
+	public void execute() throws Exception {
+		// TODO Auto-generated method stub
+		System.out.println("正在"+param);
+	    Thread.sleep(50000); //随便定义
+	}
+}
+package event;
+import task.WorkTask;
+import thread.WorkThread;
+/*
+ *任务抽象事件 
+ */
+public abstract class AbstractEvent {
+	protected WorkThread workthread;
+	protected Thread nowthread;
+	protected WorkTask nowtask;
+	//事件触发
+	public synchronized void execute(){};
+	@Override
+	public boolean equals(Object obj) {
+		// TODO Auto-generated method stub
+		AbstractEvent other=(AbstractEvent)obj;
+		return this.workthread==other.workthread&&this.nowtask==this.nowtask;
+	};
+	
+}
+package event;
+import task.WorkTask;
+import thread.ThreadPool;
+import thread.WorkThread;
+/*
+ * 任务开始运行事件
+ */
+public class BeginTaskEvent extends AbstractEvent{
+	public BeginTaskEvent(WorkThread workthread,Thread nowthread,WorkTask task){
+		this.workthread=workthread;
+		this.nowthread=nowthread;
+		this.nowtask=task;
+	}
+	@Override
+	public  void execute() {
+		// TODO Auto-generated method stub
+		ThreadPool pool=ThreadPool.getInstance();
+		pool.beginTaskRun(this);
+	}
+}
+package event;
+import task.WorkTask;
+import thread.ThreadPool;
+import thread.WorkThread;
+/*
+ * 任务运行结束事件
+ */
+public class EndTaskEvent extends AbstractEvent {
+	public EndTaskEvent(WorkThread workthread,Thread nowthread,WorkTask task){
+		this.workthread=workthread;
+		this.nowthread=nowthread;
+		this.nowtask=task;
+	}
+	@Override
+	public  void execute() {
+		// TODO Auto-generated method stub
+		ThreadPool pool=ThreadPool.getInstance();
+		pool.endTaskRun(this);
+	}
+	
+}
+package event;
+/*
+ * 任务运行时间类
+ */
+public class TaskRunTime {
+		private long begintime;
+		private long endtime;
+		private BeginTaskEvent event;
+		public TaskRunTime(BeginTaskEvent event){
+			this.event=event;
+			this.begintime=System.currentTimeMillis();
+			this.endtime=this.begintime;
+		}
+		public BeginTaskEvent getEvent() {
+			return event;
+		}
+		//检查是否超时
+		public boolean checkRunTimeOut(long maxtime){
+			endtime=System.currentTimeMillis();
+			long cha=endtime-begintime;
+			return cha>=maxtime;
+		}
+		
+	}
+package event;
+import task.WorkTask;
+import thread.ThreadPool;
+import thread.WorkThread;
+/*
+ * 任务超时事件
+ */
+public class TaskTimeOutEvent  {
+	private AbstractEvent event;
+	public TaskTimeOutEvent(AbstractEvent event){
+		this.event=event;
+	}
+	@SuppressWarnings("deprecation")
+	public  void execute() {
+		// TODO Auto-generated method stub
+		ThreadPool pool=ThreadPool.getInstance();
+		pool.addWorkThread();
+		pool.removeWorkThread(event.workthread);
+		Object obj=event.workthread.getThreadKey();
+		System.out.println("正在停止工作超时线程...线程编号"+obj);
+		event.nowthread.stop();
+		
+	}
+}
+      
+
+运行结果 
+开始初始化线程池... 
+正在创建工作线程...线程编号0 
+正在创建工作线程...线程编号1 
+正在创建工作线程...线程编号2 
+正在创建工作线程...线程编号3 
+正在创建工作线程...线程编号4 
+正在创建工作线程...线程编号5 
+正在创建工作线程...线程编号6 
+正在创建工作线程...线程编号7 
+正在创建工作线程...线程编号8 
+正在创建工作线程...线程编号9 
+正在创建任务监测线程... 
+结束初始化线程池... 
+正在执行超时任务1... 
+执行第0个增加用户操作...工作线程编号1 
+执行第1个增加用户操作...工作线程编号2 
+执行第2个增加用户操作...工作线程编号3 
+执行第3个增加用户操作...工作线程编号4 
+执行第4个增加用户操作...工作线程编号5 
+执行第5个增加用户操作...工作线程编号6 
+执行第6个增加用户操作...工作线程编号7 
+执行第7个增加用户操作...工作线程编号8 
+执行第8个增加用户操作...工作线程编号9 
+执行第9个增加用户操作...工作线程编号1 
+执行第10个增加用户操作...工作线程编号2 
+执行第11个增加用户操作...工作线程编号3 
+执行第12个增加用户操作...工作线程编号4 
+执行第13个增加用户操作...工作线程编号5 
+执行第14个增加用户操作...工作线程编号6 
+执行第15个增加用户操作...工作线程编号7 
+执行第16个增加用户操作...工作线程编号8 
+执行第17个增加用户操作...工作线程编号9 
+执行第18个增加用户操作...工作线程编号1 
+执行第19个增加用户操作...工作线程编号2 
+正在执行超时任务2... 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+运行WorkTaskAImp任务时出错 
+执行第0个删除用户操作...工作线程编号4 
+执行第1个删除用户操作...工作线程编号5 
+执行第2个删除用户操作...工作线程编号6 
+执行第3个删除用户操作...工作线程编号7 
+执行第4个删除用户操作...工作线程编号8 
+执行第5个删除用户操作...工作线程编号9 
+执行第6个删除用户操作...工作线程编号1 
+执行第7个删除用户操作...工作线程编号2 
+执行第8个删除用户操作...工作线程编号4 
+执行第9个删除用户操作...工作线程编号5 
+执行第10个删除用户操作...工作线程编号6 
+执行第11个删除用户操作...工作线程编号7 
+执行第12个删除用户操作...工作线程编号8 
+执行第13个删除用户操作...工作线程编号9 
+正在关闭任务监测线程... 
+正在关闭超时监测线程... 
+正在创建工作线程...线程编号11 
+正在停止工作超时线程...线程编号0 
+正在创建工作线程...线程编号12 
+正在停止工作超时线程...线程编号3 
+正在关闭工作线程...线程编号1 
+正在关闭工作线程...线程编号2 
+正在关闭工作线程...线程编号4 
+正在关闭工作线程...线程编号5 
+正在关闭工作线程...线程编号6 
+正在关闭工作线程...线程编号7 
+正在关闭工作线程...线程编号8 
+正在关闭工作线程...线程编号9 
+正在关闭工作线程...线程编号11 
+正在关闭工作线程...线程编号12 
+

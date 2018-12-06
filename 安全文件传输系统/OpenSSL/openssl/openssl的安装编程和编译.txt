@@ -1,0 +1,93 @@
+Openssl的安装和编程（一）(2011-04-14 16:44:04)转载▼标签： 杂谈 分类： openssl  
+官网：http://www.openssl.org/source/下载最新版，安装看解压后的readme（因为系统不一样有点不一样）
+
+我的： linux系统
+
+默认安装的：
+
+./config
+
+make
+
+make test
+
+make install
+
+头文件默认在： /usr/local/ssl/include/
+
+连接库文件在： /usr/local/ssl/lib/
+
+(其实gcc一个后发现xx地方找不到也可以把include，lib里面的东西考到xx地方嘛)
+
+ 
+
+linux上面：
+
+要跑一个client.c,一个server.c，还需要一些前提条件，那就是CA，key，csr这些东西
+
+ 
+
+用OpenSSL命令行生成证书文件，主要参照http://blog.csdn.net/darkstar21cn/archive/2005/06/11/392492.aspx
+
+结合我电脑的实际整了整。。
+
+证书文件生成
+
+（我的操作目录是/home/ming/sslfile/,先进入这个目录,为了方便我把openssl解压后的apps下的openssl.cnf也复制到了这个目录下来。）
+
+
+1.首先要生成服务器端的私钥(key文件):
+openssl genrsa -des3 -out server.key 1024
+运行时会提示输入密码，（verifying。。是要求重复输入密码。。囧，刚开始没反应过来）,此密码用于加密key文件(参数des3便是指加密算法,当然也可以选用其他你认为安全的算法.),以后每当需读取此文件(通过openssl提供的命令或API)都需输入口令.如果觉得不方便,也可以去除这个口令,但一定要采取其他的保护措施!
+去除key文件口令的命令://我这条命令暂时不执行，，还是要口令吧，后面也是这样，每次使用看看要什么的密码，输入一下对应的密码就行了
+openssl rsa -in server.key -out server.key
+
+2.openssl req -new -key server.key -out server.csr -config openssl.cnf
+生成Certificate Signing Request（CSR）,生成的csr文件交给CA签名后形成服务端自己的证书.屏幕上将有提示,依照其指示一步一步输入要求的个人信息即可.
+
+3.对客户端也作同样的命令生成key及csr文件:
+先
+
+openssl genrsa -des3 -out client.key 1024
+再
+
+openssl req -new -key client.key -out client.csr -config openssl.cnf
+
+4.CSR文件必须有CA的签名才可形成证书.可将此文件发送到verisign等地方由它验证,要交一大笔钱,何不自己做CA呢.
+openssl req -new -x509 -keyout ca.key -out ca.crt -config openssl.cnf
+
+5.用生成的CA的证书为刚才生成的server.csr,client.csr文件签名:
+openssl ca -in server.csr -out server.crt -cert ca.crt -keyfile ca.key -config openssl.cnf
+
+(会提示I am unable to access the ./demoCA/newcerts directory。。原因是英文openssl.cnf里面是这么配置的，openssl.cnf是一个模板，那么cat一下这个文件，会发现它需要哪些dir，你也可以改改这些目录，麻烦，，还是新建目录吧。。
+
+新建：(先确保你在刚才的目录/home/ming/sslfile/下面)
+
+mkdir -p ./demoCA/{newcerts,private} 
+
+     （在当前目录下新建demoCA文件夹，并在demoCA文件夹下面新建newcerts和private两个文件夹）   
+
+touch ./demoCA/index.txt
+
+touch ./demoCA/index.txt.attr     (看运行，少那个文件或者文件夹，就建哪个注意你在那个文件目录下，说不定不同的版本，openss.cnf里面的模板叫的名字不一样，关键是看openssl.cnf里面看看文件目录是怎么建的)
+
+touch ./demoCA/serial 
+
+vi ./demoCA/serial(在serial里面随便输入一点东西，比如输入“123456”)
+
+cd ..(回到/home/ming/sslfile/下面)
+
+重新openssl ca -in server.csr -out server.crt -cert ca.crt -keyfile ca.key -config openssl.cnf就行了)
+(if 出现提示default is an unsupported message digest type,没有其他信息，安装正常。遇到这个问题，一直无法解决，经过无数次测试，发现是freebsd8.1对/usr/local/etc/postfix/certs/CA/openssl.cnf的default_md = default 这条语句不识别所致，只需要将default改为md5))
+
+ 
+
+
+openssl ca -in client.csr -out client.crt -cert ca.crt -keyfile ca.key -config openssl.cnf
+
+现在我们所需的全部文件便生成了.
+
+另：
+client使用的文件有：ca.crt,client.crt,client.key
+server使用的文件有：ca.crt,server.crt,server.key
+

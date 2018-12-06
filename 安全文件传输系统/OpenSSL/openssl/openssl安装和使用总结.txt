@@ -1,0 +1,9 @@
+openssl安装和使用总结 2012-10-05 23:19:20 
+分类： LINUX
+
+
+两种安装办法：
+1.ubuntu下依次安装openssl、libssl和libssl-dev，安装完成后可直接使用openssl，若要在程序中调用openssl的bu函数库，编译时输入： gcc -o server server.c -lssl即可（注意-lssl要放在最后）
+
+2.下载openssl压缩包，解压后安装步骤：./config shared（shared表示生成动态连接库）;make；make test；make install，安装完成后在/usr/local/ssl/bin/openssl中使用openssl，库路径/usr/local/ssl/lib,头文件路径/usr/local/ssl/lib,在程序中调用其函数编译时完整输入如： 
+          gcc -o server server.c -L/usr/local/ssl/include -I/usr/local/ssl/lib -lssl -lcrypto (-Wall)
